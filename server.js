@@ -3,26 +3,28 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.SMS_API_KEY; // your sk- key stored in Render env vars
+const API_KEY = process.env.SMS_API_KEY;
 
 app.use(express.json());
-
-// Allow requests from your Netlify app URL
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || '*'
-}));
+app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 
 // Health check
 app.get('/', (req, res) => {
   res.json({ status: 'PPPoE Reminder backend running' });
 });
 
-// Send SMS endpoint
+// Format phone to +639XXXXXXXXX
+function formatPhone(raw) {
+  let num = String(raw).replace(/\D/g, '');
+  if (num.startsWith('0')) num = '63' + num.slice(1);
+  if (!num.startsWith('63')) num = '63' + num;
+  return '+' + num;
+}
+
 // POST /send-sms  { to: '09XXXXXXXXX', message: '...' }
 app.post('/send-sms', async (req, res) => {
   const { to, message } = req.body;
 
-  // Basic validation
   if (!to || !message) {
     return res.status(400).json({ ok: false, error: 'Missing to or message' });
   }
@@ -30,11 +32,8 @@ app.post('/send-sms', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'SMS_API_KEY not configured on server' });
   }
 
-  // Format phone number to +63 format
-  let phone = String(to).replace(/\D/g, '');
-  if (phone.startsWith('0')) phone = '63' + phone.slice(1);
-  if (!phone.startsWith('63')) phone = '63' + phone;
-  phone = '+' + phone;
+  const recipient = formatPhone(to);
+  console.log(`[SEND] recipient=${recipient}`);
 
   try {
     const response = await fetch('https://smsapiph.onrender.com/api/v1/send/sms', {
@@ -43,17 +42,16 @@ app.post('/send-sms', async (req, res) => {
         'Content-Type': 'application/json',
         'x-api-key': API_KEY
       },
-      body: JSON.stringify({ to: phone, message })
+      body: JSON.stringify({ recipient, message })
     });
 
     const data = await response.json().catch(() => ({}));
+    console.log(`[RESULT] status=${response.status}`, JSON.stringify(data));
 
     if (response.ok) {
-      console.log(`[OK] SMS sent to ${phone}`);
       return res.json({ ok: true, data });
     } else {
-      console.error(`[FAIL] ${phone} — ${response.status}`, data);
-      return res.status(response.status).json({ ok: false, error: data.message || 'SMS API PH error', status: response.status });
+      return res.status(response.status).json({ ok: false, error: data.message || data.error || 'SMS API PH error' });
     }
   } catch (err) {
     console.error('[ERROR]', err.message);
@@ -61,7 +59,7 @@ app.post('/send-sms', async (req, res) => {
   }
 });
 
-// Test API key endpoint
+// GET /test-key
 app.get('/test-key', async (req, res) => {
   if (!API_KEY) {
     return res.status(500).json({ ok: false, error: 'SMS_API_KEY not set' });
@@ -70,13 +68,15 @@ app.get('/test-key', async (req, res) => {
     const response = await fetch('https://smsapiph.onrender.com/api/v1/send/sms', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
-      body: JSON.stringify({ to: '+639000000000', message: 'test' })
+      body: JSON.stringify({ recipient: '+639170000000', message: 'Connection test' })
     });
-    // 401 = bad key, anything else = key is accepted
+    const data = await response.json().catch(() => ({}));
+    console.log(`[TEST] status=${response.status}`, JSON.stringify(data));
+
     if (response.status === 401) {
       return res.status(401).json({ ok: false, error: 'Invalid API key' });
     }
-    return res.json({ ok: true, message: 'API key is valid' });
+    return res.json({ ok: true, message: 'API key accepted', apiResponse: data });
   } catch (err) {
     return res.status(500).json({ ok: false, error: err.message });
   }
