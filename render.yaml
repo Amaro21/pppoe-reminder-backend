@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: pppoe-reminder-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: SMS_API_KEY
+        sync: false
+      - key: ALLOWED_ORIGIN
+        sync: false
