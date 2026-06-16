@@ -41,13 +41,17 @@ app.post('/send-sms', async (req, res) => {
   console.log(`[SEND] recipient=${recipient}`);
 
   try {
+    // UniSMS max 160 chars per SMS
+    const content = message.length > 160 ? message.slice(0, 157) + '...' : message;
+    console.log(`[SEND] content length=${content.length}`);
+
     const response = await fetch('https://unismsapi.com/api/sms', {
       method: 'POST',
       headers: {
         'Authorization': authHeader(),
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ recipient, content: message })
+      body: JSON.stringify({ recipient, content })
     });
 
     const data = await response.json().catch(() => ({}));
@@ -57,8 +61,10 @@ app.post('/send-sms', async (req, res) => {
     if (response.status === 201) {
       return res.json({ ok: true, data });
     } else {
-      const errMsg = data?.message || data?.error || `Error ${response.status}`;
-      return res.status(response.status).json({ ok: false, error: errMsg });
+      // Log full error details for debugging
+      const errMsg = data?.errors?.join(', ') || data?.message || data?.error || `Error ${response.status}`;
+      console.log(`[ERROR DETAIL]`, JSON.stringify(data));
+      return res.status(response.status).json({ ok: false, error: errMsg, detail: data });
     }
   } catch (err) {
     console.error('[ERROR]', err.message);
