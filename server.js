@@ -3,22 +3,27 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.SMS_API_KEY;    // InfiniReach API key (X-API-Key)
-const FROM_NUMBER = process.env.FROM_NUMBER; // your phone number e.g. +639XXXXXXXXX
+const API_KEY = process.env.SMS_API_KEY; // UniSMS secret key
 
 app.use(express.json());
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 
 app.get('/', (req, res) => {
-  res.json({ status: 'PPPoE Reminder backend running', provider: 'InfiniReach (your own SIM)' });
+  res.json({ status: 'PPPoE Reminder backend running', provider: 'UniSMS PH' });
 });
 
-// Format to E.164 +639XXXXXXXXX
+// Format to +639XXXXXXXXX
 function formatPhone(raw) {
   let num = String(raw).replace(/\D/g, '');
   if (num.startsWith('0')) num = '63' + num.slice(1);
   if (!num.startsWith('63')) num = '63' + num;
   return '+' + num;
+}
+
+// Basic auth header — UniSMS uses secret key as username, password blank
+function authHeader() {
+  const encoded = Buffer.from(`${API_KEY}:`).toString('base64');
+  return `Basic ${encoded}`;
 }
 
 // POST /send-sms  { to: '09XXXXXXXXX', message: '...' }
@@ -31,37 +36,29 @@ app.post('/send-sms', async (req, res) => {
   if (!API_KEY) {
     return res.status(500).json({ ok: false, error: 'SMS_API_KEY not configured' });
   }
-  if (!FROM_NUMBER) {
-    return res.status(500).json({ ok: false, error: 'FROM_NUMBER not configured' });
-  }
 
   const recipient = formatPhone(to);
-  console.log(`[SEND] to=${recipient}`);
+  console.log(`[SEND] recipient=${recipient}`);
 
   try {
-    const response = await fetch('https://api.infinireach.io/api/v1/messages', {
+    const response = await fetch('https://unismsapi.com/api/sms', {
       method: 'POST',
       headers: {
-        'X-API-Key': API_KEY,
+        'Authorization': authHeader(),
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        to: recipient,
-        message,
-        from: FROM_NUMBER,
-        channel: 'sms'
-      })
+      body: JSON.stringify({ recipient, content: message })
     });
 
     const data = await response.json().catch(() => ({}));
     console.log(`[RESULT] status=${response.status}`, JSON.stringify(data));
 
-    if (response.ok && data.success) {
+    if (response.ok) {
       return res.json({ ok: true, data });
     } else {
-      return res.status(response.status || 400).json({
+      return res.status(response.status).json({
         ok: false,
-        error: data.message || data.error || 'InfiniReach error'
+        error: data.message || data.error || 'UniSMS error'
       });
     }
   } catch (err) {
@@ -73,11 +70,9 @@ app.post('/send-sms', async (req, res) => {
 // GET /test-key
 app.get('/test-key', async (req, res) => {
   if (!API_KEY) return res.status(500).json({ ok: false, error: 'SMS_API_KEY not set' });
-  if (!FROM_NUMBER) return res.status(500).json({ ok: false, error: 'FROM_NUMBER not set' });
   try {
-    // Check recent messages to validate key
-    const response = await fetch('https://api.infinireach.io/api/v1/messages?limit=1', {
-      headers: { 'X-API-Key': API_KEY }
+    const response = await fetch('https://unismsapi.com/api/account', {
+      headers: { 'Authorization': authHeader() }
     });
     const data = await response.json().catch(() => ({}));
     console.log(`[TEST] status=${response.status}`, JSON.stringify(data));
@@ -85,7 +80,9 @@ app.get('/test-key', async (req, res) => {
     if (response.ok) {
       return res.json({
         ok: true,
-        message: `InfiniReach connected! From: ${FROM_NUMBER}`
+        message: 'UniSMS connected!',
+        credits: data.credits || data.balance,
+        account: data
       });
     } else {
       return res.status(401).json({ ok: false, error: 'Invalid API key' });
@@ -96,5 +93,5 @@ app.get('/test-key', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`PPPoE backend (InfiniReach) on port ${PORT}`);
+  console.log(`PPPoE backend (UniSMS) on port ${PORT}`);
 });
