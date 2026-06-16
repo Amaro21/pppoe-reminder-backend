@@ -3,7 +3,7 @@ const cors = require('cors');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.SMS_API_KEY; // UniSMS secret key
+const API_KEY = process.env.SMS_API_KEY; // UniSMS secret key (sk_XXXXXXXX)
 
 app.use(express.json());
 app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
@@ -12,7 +12,7 @@ app.get('/', (req, res) => {
   res.json({ status: 'PPPoE Reminder backend running', provider: 'UniSMS PH' });
 });
 
-// Format to +639XXXXXXXXX
+// Format to E.164 +639XXXXXXXXX
 function formatPhone(raw) {
   let num = String(raw).replace(/\D/g, '');
   if (num.startsWith('0')) num = '63' + num.slice(1);
@@ -20,7 +20,7 @@ function formatPhone(raw) {
   return '+' + num;
 }
 
-// Basic auth header — UniSMS uses secret key as username, password blank
+// Basic auth — API key as username, empty password
 function authHeader() {
   const encoded = Buffer.from(`${API_KEY}:`).toString('base64');
   return `Basic ${encoded}`;
@@ -53,13 +53,12 @@ app.post('/send-sms', async (req, res) => {
     const data = await response.json().catch(() => ({}));
     console.log(`[RESULT] status=${response.status}`, JSON.stringify(data));
 
-    if (response.ok) {
+    // UniSMS returns 201 on success
+    if (response.status === 201) {
       return res.json({ ok: true, data });
     } else {
-      return res.status(response.status).json({
-        ok: false,
-        error: data.message || data.error || 'UniSMS error'
-      });
+      const errMsg = data?.message || data?.error || `Error ${response.status}`;
+      return res.status(response.status).json({ ok: false, error: errMsg });
     }
   } catch (err) {
     console.error('[ERROR]', err.message);
@@ -67,7 +66,7 @@ app.post('/send-sms', async (req, res) => {
   }
 });
 
-// GET /test-key
+// GET /test-key — uses the /account endpoint from docs
 app.get('/test-key', async (req, res) => {
   if (!API_KEY) return res.status(500).json({ ok: false, error: 'SMS_API_KEY not set' });
   try {
@@ -80,9 +79,10 @@ app.get('/test-key', async (req, res) => {
     if (response.ok) {
       return res.json({
         ok: true,
-        message: 'UniSMS connected!',
-        credits: data.credits || data.balance,
-        account: data
+        message: `UniSMS connected! Credits: ${data.sms_credits}`,
+        credits: data.sms_credits,
+        email: data.email,
+        status: data.status
       });
     } else {
       return res.status(401).json({ ok: false, error: 'Invalid API key' });
